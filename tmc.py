@@ -23,6 +23,7 @@ filename = dt_string + ".csv"
 start_time = time.time()
 running = True
 device_name = "cDAQsim1"
+#device_name = "cDAQ1"
 
 pwm_channels = [
     device_name + "Mod3/port0/line0", device_name + "Mod3/port0/line1", device_name + "Mod3/port0/line2", 
@@ -49,12 +50,12 @@ temperatures = [[25.0]] * len(thermocouple_channels)  # Store the most recent te
 duty_cycle_locks = [threading.Lock() for _ in range(len(pwm_channels))]  # Lock for each channel to update duty cycle
 
 # PID controller setup (one for each thermocouple-PWM pair)
-pids = [PID(2.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
 for pid in pids:
     pid.output_limits = (0, 1.0)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
 
 # PID controller setup (one for each thermocouple-PWM pair)
-prediction_pids = [PID(2.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+prediction_pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
 for pid in prediction_pids:
     pid.output_limits = (0, 1.0)  # Constrain the duty cycle output to 0 (0%) and 1 (100%) 
 
@@ -81,16 +82,21 @@ def read_temperatures():
         while running:
             # Read temperatures from all 8 channels
             temps = task.read(number_of_samples_per_channel=1)
-            #for i in range(len(thermocouple_channels)):
-                #temperatures[i] = temps[i]
+            for i in range(len(thermocouple_channels)):
+                temperatures[i] = temps[i]
                 #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+            new_list = []
+            for list in temps:
+                new_list.append(list[0])
+            formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in new_list) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
+            print(formatted_output)
             time.sleep(1.0 / sample_rate)
 
             # test
-            for i in range(len(temperatures)):
-                temp = temperatures[i][0]
-                temperatures[i][0] = temp + 0.1
-                print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+            #for i in range(len(temperatures)):
+            #    temp = temperatures[i][0]
+            #    temperatures[i][0] = temp + 0.1
+            #    print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
 
 # Function for generating PWM signals for 8 outputs with NI 9472
 def generate_pwm():
@@ -138,24 +144,12 @@ def generate_pwm():
 K = 5.0  # System gain
 T = 1.0  # System time constant
 L = 2.0  # Delay (in seconds)
-delay_steps = 10  # Number of time steps for the delay
-
-# Initialize storage for delayed outputs
-temperature_history = [25] * delay_steps
 
 def model_temperature_without_delay(heater_power, current_temperature):
     """Simulate temperature change without delay."""
     # Simple thermal model: next temperature depends on power and current temperature
     new_temperature = current_temperature + K * heater_power / (T + 1)
     return new_temperature
-
-def model_temperature_with_delay(heater_power):
-    """Simulate temperature with delay."""
-    # Append the temperature based on heater power, simulate delay by shifting
-    predicted_temperature = model_temperature_without_delay(heater_power, temperature_history[-1])
-    temperature_history.append(predicted_temperature)
-    delayed_temperature = temperature_history.pop(0)
-    return delayed_temperature
 
 # Simulate temperature change with delay
 def model_temperature_with_delay(heater_power, current_temperature, previous_temperatures):
@@ -199,12 +193,14 @@ def control_pwm_duty_cycles():
                 #duty_cycles[i] = pids[i](current_temperature)
 
                 # test with fixed duty cycle
-                duty_cycles[i] = 0.1
+                duty_cycles[i] = 0.2
 
             with open(filename, 'a') as file:
                 file.write(f"{current_temperature:.2f}; ")
 
-            print(f"Duty Cycle {i} (from PID): {duty_cycles[i]:.2f}")
+            #print(f"Duty Cycle {i} (from PID): {duty_cycles[i]:.2f}")
+        #formatted_output = "Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
+        #print(formatted_output)
         with open(filename, 'a') as file:
             file.write("\n")
         time.sleep(0.5)  # Update the duty cycles every 0.5 seconds
