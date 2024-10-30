@@ -6,7 +6,6 @@ from simple_pid import PID
 import keyboard  # To detect key presses
 
 import logging
-import pandas as pd
 from datetime import datetime
 
 # Configure logging
