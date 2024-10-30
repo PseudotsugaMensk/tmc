@@ -5,7 +5,22 @@ import threading
 from simple_pid import PID
 import keyboard  # To detect key presses
 
+import logging
+import pandas as pd
+from datetime import datetime
 
+# Configure logging
+logging.basicConfig(
+    filename='app.log',           # Log file name
+    filemode='a',                # Append mode ('a' for append, 'w' for overwrite)
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Log message format
+    level=logging.INFO            # Set the logging level
+)
+
+now = datetime.now()
+dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
+filename = dt_string + ".csv" 
+start_time = time.time()
 running = True
 device_name = "cDAQsim1"
 
@@ -122,15 +137,16 @@ def generate_pwm():
 # System parameters
 K = 5.0  # System gain
 T = 1.0  # System time constant
+L = 2.0  # Delay (in seconds)
 delay_steps = 10  # Number of time steps for the delay
 
 # Initialize storage for delayed outputs
 temperature_history = [25] * delay_steps
 
-def model_temperature_without_delay(heater_power, _current_temperature):
+def model_temperature_without_delay(heater_power, current_temperature):
     """Simulate temperature change without delay."""
     # Simple thermal model: next temperature depends on power and current temperature
-    new_temperature = _current_temperature + K * heater_power / (T + 1)
+    new_temperature = current_temperature + K * heater_power / (T + 1)
     return new_temperature
 
 def model_temperature_with_delay(heater_power):
@@ -141,25 +157,56 @@ def model_temperature_with_delay(heater_power):
     delayed_temperature = temperature_history.pop(0)
     return delayed_temperature
 
+# Simulate temperature change with delay
+def model_temperature_with_delay(heater_power, current_temperature, previous_temperatures):
+    """Simulate temperature change considering delay."""
+    # Using the previous temperature state to account for delay
+    if len(previous_temperatures) == 0:
+        return current_temperature  # If no previous state, return current temperature
+    return model_temperature_without_delay(heater_power, previous_temperatures[-1])
+
 # Function to adjust the PWM duty cycles using PID control based on the temperatures
 def control_pwm_duty_cycles():
     global duty_cycles
+    previous_temperatures = [[] for _ in range(len(pwm_channels))]
+
     while running:
+        elapsed_time = time.time() - start_time
+        with open(filename, 'a') as file:
+            file.write(f"{elapsed_time}; ")
         for i in range(len(pwm_channels)):
             with duty_cycle_locks[i]:
                 # Get the current temperature reading for each sensor
                 current_temperature = temperatures[i][0]
 
-                # Smith Predictor: Calculate the temperature without the delay
-                predicted_temperature = model_temperature_without_delay(prediction_pids[i](set_points[i] - current_temperature), current_temperature)
+                # Simulate the heater power using the PID controller
+                heater_power = prediction_pids[i](set_points[i] - current_temperature)
+
+                # Smith Predictor: Calculate the predicted temperature considering the delay
+                predicted_temperature = model_temperature_with_delay(heater_power, current_temperature, previous_temperatures[i])
 
                 # Calculate the control signal (heater power) based on predicted temperature
                 duty_cycles[i] = pids[i](predicted_temperature)
 
+                # Store the current temperature for future delay reference
+                previous_temperatures[i].append(current_temperature)
+
+                # Limit the length of previous temperatures to the number of time steps equal to L
+                if len(previous_temperatures[i]) > int(L / 0.5):  # Assuming time step is 0.5 seconds
+                    previous_temperatures[i].pop(0)
+
                 # Use the PID controller to calculate the new duty cycle based on temperature error
                 #duty_cycles[i] = pids[i](current_temperature)
 
+                # test with fixed duty cycle
+                duty_cycles[i] = 0.1
+
+            with open(filename, 'a') as file:
+                file.write(f"{current_temperature:.2f}; ")
+
             print(f"Duty Cycle {i} (from PID): {duty_cycles[i]:.2f}")
+        with open(filename, 'a') as file:
+            file.write("\n")
         time.sleep(0.5)  # Update the duty cycles every 0.5 seconds
 
 # Function to check for a keystroke (e.g., 'q' to quit) and exit
