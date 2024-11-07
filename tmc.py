@@ -5,21 +5,14 @@ import threading
 from simple_pid import PID
 import keyboard  # To detect key presses
 
-import logging
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(
-    filename='app.log',           # Log file name
-    filemode='a',                # Append mode ('a' for append, 'w' for overwrite)
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Log message format
-    level=logging.INFO            # Set the logging level
-)
 
 now = datetime.now()
 dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
-filename = dt_string + ".csv" 
+filename = "./log/" + dt_string + ".csv" 
 start_time = time.time()
+print("start time ", start_time)
 running = True
 device_name = "cDAQsim1"
 #device_name = "cDAQ1"
@@ -41,7 +34,7 @@ frequency = 0.5  # Frequency in Hz
 duty_cycles = [0.0] * len(pwm_channels)  # Initial duty cycles for 6 channels (0.0 to 1.0)
 max_temperature_difference = 10.0 # max difference between setpoint and actual temperature
 
-target_temperature = 30.0  # Desired temperature (setpoint) for all sensors
+target_temperature = 40.0  # Desired temperature (setpoint) for all sensors
 set_points = [target_temperature] * len(pwm_channels)
 
 # Shared variables between threads (global)
@@ -49,12 +42,34 @@ temperatures = [[25.0]] * len(thermocouple_channels)  # Store the most recent te
 duty_cycle_locks = [threading.Lock() for _ in range(len(pwm_channels))]  # Lock for each channel to update duty cycle
 
 # PID controller setup (one for each thermocouple-PWM pair)
-pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+#pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+pidParams = {
+    "T1" : {"Kp" : 0.064823199, "Ki" : 0.001087731, "Kd" : 2.422442948}, 
+    "T2" : {"Kp" : 0.062793234, "Ki" : 0.001055583, "Kd" : 2.346583167},
+    "T3" : {"Kp" : 0.071449094, "Ki" : 0.00120115, "Kd" : 2.670052627},
+    "B1" : {"Kp" : 0.139964202, "Ki" : 0.002342305, "Kd" : 5.230462219},
+    "B2" : {"Kp" : 0.106006268, "Ki" : 0.001777297, "Kd" : 3.961454223},
+    "B3" : {"Kp" : 0.104808663, "Ki" : 0.001758581, "Kd" : 3.91669975},
+}
+pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"], setpoint=target_temperature),
+        PID(pidParams["T2"]["Kp"], pidParams["T2"]["Ki"], pidParams["T2"]["Kd"], setpoint=target_temperature),
+        PID(pidParams["T3"]["Kp"], pidParams["T3"]["Ki"], pidParams["T3"]["Kd"], setpoint=target_temperature),
+        PID(pidParams["B1"]["Kp"], pidParams["B1"]["Ki"], pidParams["B1"]["Kd"], setpoint=target_temperature),
+        PID(pidParams["B2"]["Kp"], pidParams["B2"]["Ki"], pidParams["B2"]["Kd"], setpoint=target_temperature),
+        PID(pidParams["B3"]["Kp"], pidParams["B3"]["Ki"], pidParams["B3"]["Kd"], setpoint=target_temperature)
+        ]
 for pid in pids:
-    pid.output_limits = (0, 1.0)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
+    pid.output_limits = (0, 0.5)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
 
 # PID controller setup (one for each thermocouple-PWM pair)
-prediction_pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+#prediction_pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+prediction_pids =   [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"], setpoint=target_temperature),
+                    PID(pidParams["T2"]["Kp"], pidParams["T2"]["Ki"], pidParams["T2"]["Kd"], setpoint=target_temperature),
+                    PID(pidParams["T3"]["Kp"], pidParams["T3"]["Ki"], pidParams["T3"]["Kd"], setpoint=target_temperature),
+                    PID(pidParams["B1"]["Kp"], pidParams["B1"]["Ki"], pidParams["B1"]["Kd"], setpoint=target_temperature),
+                    PID(pidParams["B2"]["Kp"], pidParams["B2"]["Ki"], pidParams["B2"]["Kd"], setpoint=target_temperature),
+                    PID(pidParams["B3"]["Kp"], pidParams["B3"]["Ki"], pidParams["B3"]["Kd"], setpoint=target_temperature)
+                    ]
 for pid in prediction_pids:
     pid.output_limits = (0, 1.0)  # Constrain the duty cycle output to 0 (0%) and 1 (100%) 
 
@@ -81,21 +96,25 @@ def read_temperatures():
         while running:
             # Read temperatures from all 8 channels
             temps = task.read(number_of_samples_per_channel=1)
-            for i in range(len(thermocouple_channels)):
-                temperatures[i] = temps[i]
+            #for i in range(len(thermocouple_channels)):
+                #temperatures[i] = temps[i]
                 #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
             new_list = []
             for list in temps:
                 new_list.append(list[0])
+            
+            # test
+            new_list = []
+            for i in range(len(temperatures)):
+                temp = temperatures[i][0]
+                temperatures[i][0] = temp + 0.01
+                new_list.append(temp + 0.01)
+                #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+            
             formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in new_list) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
             print(formatted_output)
-            time.sleep(1.0 / sample_rate)
 
-            # test
-            #for i in range(len(temperatures)):
-            #    temp = temperatures[i][0]
-            #    temperatures[i][0] = temp + 0.1
-            #    print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+            time.sleep(1.0 / sample_rate)
 
 # Function for generating PWM signals for 8 outputs with NI 9472
 def generate_pwm():
@@ -162,11 +181,13 @@ def model_temperature_with_delay(heater_power, current_temperature, previous_tem
 def control_pwm_duty_cycles():
     global duty_cycles
     previous_temperatures = [[] for _ in range(len(pwm_channels))]
-
+    counter = 0
+    print("start at ", time.time() - start_time)
     while running:
         elapsed_time = time.time() - start_time
-        with open(filename, 'a') as file:
-            file.write(f"{elapsed_time}; ")
+        if counter >= 10:
+            with open(filename, 'a') as file:
+                file.write(f"{elapsed_time:.0f}; ")
         for i in range(len(pwm_channels)):
             with duty_cycle_locks[i]:
                 # Get the current temperature reading for each sensor
@@ -189,19 +210,25 @@ def control_pwm_duty_cycles():
                     previous_temperatures[i].pop(0)
 
                 # Use the PID controller to calculate the new duty cycle based on temperature error
-                #duty_cycles[i] = pids[i](current_temperature)
+                duty_cycles[i] = pids[i](current_temperature)
 
                 # test with fixed duty cycle
-                duty_cycles[i] = 0.2
-
-            with open(filename, 'a') as file:
-                file.write(f"{current_temperature:.2f}; ")
+                #duty_cycles[i] = 0.1
+            
+            if counter >= 10:
+                with open(filename, 'a') as file:
+                    file.write(f"{current_temperature:.2f}; ")
+                    file.write(f"{duty_cycles[i]:.2f}; ")
+                    
 
             #print(f"Duty Cycle {i} (from PID): {duty_cycles[i]:.2f}")
         #formatted_output = "Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
         #print(formatted_output)
-        with open(filename, 'a') as file:
-            file.write("\n")
+        if counter >= 10:
+            counter = 0
+            with open(filename, 'a') as file:
+                file.write("\n")
+        counter += 1
         time.sleep(0.5)  # Update the duty cycles every 0.5 seconds
 
 # Function to check for a keystroke (e.g., 'q' to quit) and exit
