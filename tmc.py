@@ -51,6 +51,23 @@ pidParams = {
     "B2" : {"Kp" : 0.106006268, "Ki" : 0.001777297, "Kd" : 3.961454223},
     "B3" : {"Kp" : 0.104808663, "Ki" : 0.001758581, "Kd" : 3.91669975},
 }
+
+Kpt = 0.02
+Kit = 0.000
+Kdt = 5.0
+Kpb = 0.03
+Kib = 0.000
+Kdb = 5.0
+pidParams = {
+    "T1" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+    "T2" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+    "T3" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+    "B1" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+    "B2" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+    "B3" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+}
+
+
 pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"], setpoint=target_temperature),
         PID(pidParams["T2"]["Kp"], pidParams["T2"]["Ki"], pidParams["T2"]["Kd"], setpoint=target_temperature),
         PID(pidParams["T3"]["Kp"], pidParams["T3"]["Ki"], pidParams["T3"]["Kd"], setpoint=target_temperature),
@@ -107,8 +124,9 @@ def read_temperatures():
             new_list = []
             for i in range(len(temperatures)):
                 temp = temperatures[i][0]
-                temperatures[i][0] = temp + 0.01
-                new_list.append(temp + 0.01)
+                temp = temp + 0.01
+                temperatures[i][0] = temp
+                new_list.append(temp)
                 #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
             
             formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in new_list) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
@@ -125,12 +143,11 @@ def generate_pwm():
             task.do_channels.add_do_chan(channel)
 
         # Initialize time tracking for each PWM channel
-        last_update_time = time.time()
+        last_update_times = [time.time()] * len(pwm_channels)
         pwm_states = [False] * len(pwm_channels)  # Track whether each output is on (True) or off (False)
 
         while running:
             current_time = time.time()
-            elapsed_time = current_time - last_update_time
 
             # Loop over each PWM channel to update its state based on its duty cycle
             for i in range(len(pwm_channels)):
@@ -140,18 +157,21 @@ def generate_pwm():
                     on_time = period * current_duty_cycle  # Time the output should be ON
                     off_time = period - on_time  # Time the output should be OFF
 
+                # Update the state of each channel based on its last update time
+                elapsed_time = current_time - last_update_times[i]
+
                 # Update the state of each channel based on the elapsed time
                 if pwm_states[i]:  # If currently ON
                     if elapsed_time >= on_time:
                         pwm_states[i] = False  # Turn OFF if the ON time has elapsed
-                        last_update_time = current_time
+                        last_update_times[i] = current_time
                 else:  # If currently OFF
                     if elapsed_time >= off_time:
                         pwm_states[i] = True  # Turn ON if the OFF time has elapsed
-                        last_update_time = current_time
+                        last_update_times[i] = current_time
 
             # Write the updated states (True/False) for all channels simultaneously
-            pwm_states
+            #pwm_states
             task.write(pwm_states)
         
         # Turn all outputs OFF
@@ -159,9 +179,9 @@ def generate_pwm():
         task.write(pwm_states)
 
 # System parameters
-K = 5.0  # System gain
-T = 1.0  # System time constant
-L = 2.0  # Delay (in seconds)
+K = 700.0  # System gain
+T = 4000.0  # System time constant
+L = 100.0  # Delay (in seconds)
 
 def model_temperature_without_delay(heater_power, current_temperature):
     """Simulate temperature change without delay."""
@@ -194,20 +214,20 @@ def control_pwm_duty_cycles():
                 current_temperature = temperatures[i][0]
 
                 # Simulate the heater power using the PID controller
-                heater_power = prediction_pids[i](set_points[i] - current_temperature)
+                #heater_power = prediction_pids[i](set_points[i] - current_temperature)
 
                 # Smith Predictor: Calculate the predicted temperature considering the delay
-                predicted_temperature = model_temperature_with_delay(heater_power, current_temperature, previous_temperatures[i])
+                #predicted_temperature = model_temperature_with_delay(heater_power, current_temperature, previous_temperatures[i])
 
                 # Calculate the control signal (heater power) based on predicted temperature
-                duty_cycles[i] = pids[i](predicted_temperature)
+                #duty_cycles[i] = pids[i](predicted_temperature)
 
                 # Store the current temperature for future delay reference
-                previous_temperatures[i].append(current_temperature)
+                #previous_temperatures[i].append(current_temperature)
 
                 # Limit the length of previous temperatures to the number of time steps equal to L
-                if len(previous_temperatures[i]) > int(L / 0.5):  # Assuming time step is 0.5 seconds
-                    previous_temperatures[i].pop(0)
+                #if len(previous_temperatures[i]) > int(L / 0.5):  # Assuming time step is 0.5 seconds
+                #    previous_temperatures[i].pop(0)
 
                 # Use the PID controller to calculate the new duty cycle based on temperature error
                 duty_cycles[i] = pids[i](current_temperature)
