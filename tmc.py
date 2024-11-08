@@ -4,16 +4,20 @@ import time
 import threading
 from simple_pid import PID
 import keyboard  # To detect key presses
+import os
 
 from datetime import datetime
 
 # choose device name for simulation or real device
 sumulation_device_name = "cDAQsim1"
 real_device_name = "cDAQ1"
-device_name = real_device_name
+device_name = sumulation_device_name
 
 # choose to simulate a temperature rise
-simulate_temperature_rise = False
+simulate_temperature_rise = True
+
+# log interval in seconds
+log_interval = 1
 
 # Define the maximum allowable heating rate in degrees per second
 max_heating_rate_h = 20         # ideally 5 - 20 K/h
@@ -91,9 +95,12 @@ for pid in pids:
 
 
 # logging parameters
+os.makedirs('./log', exist_ok=True)  # Create directory if it doesn't exist
 now = datetime.now()
 dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
 filename = "./log/" + dt_string + ".csv"
+first_real_reading_logged = False
+real_temperature_read = False
 
 # timing init
 start_time = time.time()
@@ -122,6 +129,7 @@ def read_temperatures():
     global temperatures
     global duty_cycles
     global temperature_rate_of_change
+    global real_temperature_read
     with nidaqmx.Task() as task:
         # Add all 6 thermocouple channels to the task
         for channel in thermocouple_channels:
@@ -149,6 +157,7 @@ def read_temperatures():
                     temperatures_formatted.append(temp)
                     #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
             
+            real_temperature_read = True
             new_setpoint = adjust_setpoint()
 
             elapsed_time = time.time() - start_time
@@ -212,6 +221,9 @@ def generate_pwm():
 def control_pwm_duty_cycles():
     global duty_cycles
     global temperature_rate_of_change
+    global first_real_reading_logged
+    global real_temperature_read
+    global temperatures
     previous_temperatures = [[0.0] for _ in range(len(pwm_channels))]
     previous_time = time.time()
     temperature_history = {i: [] for i in range(len(pwm_channels))}  # Store temperatures for each channel over time
@@ -224,7 +236,7 @@ def control_pwm_duty_cycles():
         elapsed_time = time.time() - start_time
         current_time = time.time()
         # Time delta in minutes (convert from seconds to minutes)
-        time_delta_minutes = (current_time - previous_time) / 60.0  # Convert seconds to minutes
+        time_delta_minutes = (current_time - previous_time)  # Convert seconds to minutes
         
         # Store current temperatures every 0.5 seconds
         for i in range(len(pwm_channels)):
@@ -252,7 +264,7 @@ def control_pwm_duty_cycles():
                 if temperature_rate_of_change > max_heating_rate_min:
                     # Reduce the duty cycle if the rate of change is too high
                     duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate_min))
-                    print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
+                    # print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
                 else:
                     # heating rate ok
                     duty_cycles[i] = pid_output
@@ -263,17 +275,22 @@ def control_pwm_duty_cycles():
                 #duty_cycles[i] = 0.1
 
         # Log temperature and duty cycles periodically
-        if counter >= 10:
+        if counter >= log_interval * 2 or not first_real_reading_logged and real_temperature_read:
+            first_real_reading_logged = True
             with open(filename, 'a') as file:
                 file.write(f"{elapsed_time:.0f}; ")
 
-            # Write current temperature and duty cycle for each channel
-            for i in range(len(pwm_channels)):
-                with duty_cycle_locks[i]:
-                    with open(filename, 'a') as file:
+                # Write current temperature and duty cycle for each channel
+                for i in range(len(pwm_channels)):
+                    with duty_cycle_locks[i]:
                         file.write(f"{temperatures[i][0]:.2f}; ")
+                        #print(temperatures[i][0])
+                for i in range(len(pwm_channels)):
+                    with duty_cycle_locks[i]:
                         file.write(f"{duty_cycles[i]:.2f}; ")
-            with open(filename, 'a') as file:
+                
+                file.write(f"{pids[0].setpoint:.2f}; {temperature_rate_of_change * 60:.2f}; {max_heating_rate_h:.2f}; {target_temperature:.2f};")
+
                 file.write("\n")
             counter = 0
         
@@ -304,15 +321,18 @@ pwm_thread = threading.Thread(target=generate_pwm)
 control_thread = threading.Thread(target=control_pwm_duty_cycles)
 exit_thread = threading.Thread(target=check_for_exit)  # Thread for exiting the program
 
+
 # Start all threads
 temperature_thread.start()
 pwm_thread.start()
 control_thread.start()
 exit_thread.start()
 
+
 # Join threads to wait for their completion (they run indefinitely in this case)
 temperature_thread.join()
 pwm_thread.join()
 control_thread.join()
 exit_thread.join()  # Exit the program after 'q' is pressed
+
 
