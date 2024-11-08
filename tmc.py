@@ -275,22 +275,17 @@ def control_pwm_duty_cycles():
                 #duty_cycles[i] = 0.1
 
         # Log temperature and duty cycles periodically
-        if counter >= log_interval * 2 or not first_real_reading_logged and real_temperature_read:
-            first_real_reading_logged = True
+        if counter >= 2:
             with open(filename, 'a') as file:
                 file.write(f"{elapsed_time:.0f}; ")
 
-                # Write current temperature and duty cycle for each channel
-                for i in range(len(pwm_channels)):
-                    with duty_cycle_locks[i]:
+            # Write current temperature and duty cycle for each channel
+            for i in range(len(pwm_channels)):
+                with duty_cycle_locks[i]:
+                    with open(filename, 'a') as file:
                         file.write(f"{temperatures[i][0]:.2f}; ")
-                        #print(temperatures[i][0])
-                for i in range(len(pwm_channels)):
-                    with duty_cycle_locks[i]:
                         file.write(f"{duty_cycles[i]:.2f}; ")
-                
-                file.write(f"{pids[0].setpoint:.2f}; {temperature_rate_of_change * 60:.2f}; {max_heating_rate_h:.2f}; {target_temperature:.2f};")
-
+            with open(filename, 'a') as file:
                 file.write("\n")
             counter = 0
         
