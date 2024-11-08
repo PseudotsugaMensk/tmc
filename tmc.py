@@ -10,21 +10,19 @@ from datetime import datetime
 # choose device name for simulation or real device
 sumulation_device_name = "cDAQsim1"
 real_device_name = "cDAQ1"
-device_name = sumulation_device_name
+device_name = real_device_name
 
+# choose to simulate a temperature rise
 simulate_temperature_rise = False
 
 # Define the maximum allowable heating rate in degrees per second
-max_heating_rate_h = 5      # ideally 5 - 20 K/h
-max_heating_rate = 5 / 3600 # translate K/h in K/s
-max_heating_rate = 100.0    # manually set
-max_temp_difference = 10.0  # max difference between setpoint and actual temperature, ideally max 5 K
-target_temperature = 60.0   # Desired temperature (setpoint) for all sensors
+max_heating_rate_h = 20         # ideally 5 - 20 K/h
+max_temp_difference = 10.0      # max difference between setpoint and actual temperature, ideally max 5 K
+target_temperature = 60.0       # Desired temperature (setpoint) for all sensors
 
-
-# logging parameters
-dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
-filename = "./log/" + dt_string + ".csv"
+# temp rate init
+temperature_rate_of_change = 0 # temperature change in K/min
+max_heating_rate_min = max_heating_rate_h / 60 # translate K/h in K/min
 
 # Parameters for PWM signal (initial values for each of the 6 channels)
 pwm_channels = [
@@ -92,6 +90,11 @@ for pid in pids:
     pid.output_limits = (0, 0.5)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
 
 
+# logging parameters
+now = datetime.now()
+dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
+filename = "./log/" + dt_string + ".csv"
+
 # timing init
 start_time = time.time()
 print("start time ", start_time)
@@ -118,6 +121,7 @@ def adjust_setpoint():
 def read_temperatures():
     global temperatures
     global duty_cycles
+    global temperature_rate_of_change
     with nidaqmx.Task() as task:
         # Add all 6 thermocouple channels to the task
         for channel in thermocouple_channels:
@@ -147,7 +151,16 @@ def read_temperatures():
             
             new_setpoint = adjust_setpoint()
 
-            formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in temperatures_formatted) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles) + f" NewSetpoint: {new_setpoint:.2f} "
+            elapsed_time = time.time() - start_time
+            # Convert elapsed time in seconds to hh:mm:ss
+            hours = int(elapsed_time // 3600)
+            minutes = int((elapsed_time % 3600) // 60)
+            seconds = int(elapsed_time % 60)
+
+            # Format the elapsed time as a string
+            elapsed_time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+
+            formatted_output = f"Time: {elapsed_time_str}" " Temp: " + " ".join(f"{num:.2f}" for num in temperatures_formatted) + " DutyCycle: " + " ".join(f"{num:.2f}" for num in duty_cycles) + f" Setpoint: {new_setpoint:.2f} " + f"TempChange[K/h]: {temperature_rate_of_change * 60:.2f} " + f"Max[K/h]: {max_heating_rate_h:.2f}"
             print(formatted_output)
 
             time.sleep(1.0 / sample_rate)
@@ -189,7 +202,6 @@ def generate_pwm():
                         last_update_times[i] = current_time
 
             # Write the updated states (True/False) for all channels simultaneously
-            #pwm_states
             task.write(pwm_states)
         
         # Turn all outputs OFF
@@ -199,35 +211,47 @@ def generate_pwm():
 # Function to adjust the PWM duty cycles using PID control based on the temperatures
 def control_pwm_duty_cycles():
     global duty_cycles
+    global temperature_rate_of_change
     previous_temperatures = [[0.0] for _ in range(len(pwm_channels))]
     previous_time = time.time()
+    temperature_history = {i: [] for i in range(len(pwm_channels))}  # Store temperatures for each channel over time
+    
 
     counter = 0
     print("start at ", time.time() - start_time)
+
     while running:
         elapsed_time = time.time() - start_time
         current_time = time.time()
-        time_delta = current_time - previous_time
+        # Time delta in minutes (convert from seconds to minutes)
+        time_delta_minutes = (current_time - previous_time) / 60.0  # Convert seconds to minutes
+        
+        # Store current temperatures every 0.5 seconds
+        for i in range(len(pwm_channels)):
+            current_temperature = temperatures[i][0]
+            temperature_history[i].append(current_temperature)  # Store the current temperature in the history list
 
-        if counter >= 10:
-            with open(filename, 'a') as file:
-                file.write(f"{elapsed_time:.0f}; ")
+            # Keep the history size to 120 (for 1 minute with 0.5-second intervals)
+            if len(temperature_history[i]) > 120:
+                temperature_history[i].pop(0)  # Remove the oldest entry (i.e., 1 minute ago)
 
         for i in range(len(pwm_channels)):
             with duty_cycle_locks[i]:
                 # Get the current temperature reading for each sensor
                 current_temperature = temperatures[i][0]
 
-                # Calculate the rate of temperature change
-                temperature_rate_of_change = (current_temperature - previous_temperatures[i][0]) / time_delta
+                # Temperature 1 minute ago (120 half-seconds ago) or if not enough data then the oldest
+                previous_temperature = temperature_history[i][0]
+
+                # Calculate the rate of temperature change in °C/min (multiply by 2 to convert 0.5 sec intervals to 1 min)
+                temperature_rate_of_change = (current_temperature - previous_temperature) * 2
 
                 # Apply PID control
                 pid_output = pids[i](current_temperature)
-                
                 # Check if the heating rate exceeds the maximum allowable rate
-                if temperature_rate_of_change > max_heating_rate:
+                if temperature_rate_of_change > max_heating_rate_min:
                     # Reduce the duty cycle if the rate of change is too high
-                    duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate))
+                    duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate_min))
                     print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
                 else:
                     # heating rate ok
@@ -235,23 +259,23 @@ def control_pwm_duty_cycles():
                 # Update previous temperatures for the next rate calculation
                 previous_temperatures[i][0] = current_temperature
 
-
                 # test with fixed duty cycle
                 #duty_cycles[i] = 0.1
-            
-            if counter >= 10:
-                with open(filename, 'a') as file:
-                    file.write(f"{current_temperature:.2f}; ")
-                    file.write(f"{duty_cycles[i]:.2f}; ")
-                    
 
-            #print(f"Duty Cycle {i} (from PID): {duty_cycles[i]:.2f}")
-        #formatted_output = "Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles)
-        #print(formatted_output)
+        # Log temperature and duty cycles periodically
         if counter >= 10:
-            counter = 0
+            with open(filename, 'a') as file:
+                file.write(f"{elapsed_time:.0f}; ")
+
+            # Write current temperature and duty cycle for each channel
+            for i in range(len(pwm_channels)):
+                with duty_cycle_locks[i]:
+                    with open(filename, 'a') as file:
+                        file.write(f"{temperatures[i][0]:.2f}; ")
+                        file.write(f"{duty_cycles[i]:.2f}; ")
             with open(filename, 'a') as file:
                 file.write("\n")
+            counter = 0
         
         # Update the previous timestamp and reset the counter
         previous_time = current_time
