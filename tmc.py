@@ -8,8 +8,8 @@ import keyboard  # To detect key presses
 from datetime import datetime
 
 # Define the maximum allowable heating rate in degrees per second
-max_heating_rate = 1.5  # Example: 0.5 degrees per second
-max_temp_difference = 20.0 # max difference between setpoint and actual temperature
+max_heating_rate = 100.0  # Example: 0.5 degrees per second, ideally 5 - 20 K/h
+max_temp_difference = 20.0 # max difference between setpoint and actual temperature, ideally max 5 K
 target_temperature = 60.0  # Desired temperature (setpoint) for all sensors
 
 now = datetime.now()
@@ -54,20 +54,29 @@ pidParams = {
     "B3" : {"Kp" : 0.104808663, "Ki" : 0.001758581, "Kd" : 3.91669975},
 }
 
-Kpt = 0.02
-Kit = 0.000
-Kdt = 5.0
-Kpb = 0.03
-Kib = 0.000
-Kdb = 5.0
 pidParams = {
-    "T1" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
-    "T2" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
-    "T3" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
-    "B1" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
-    "B2" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
-    "B3" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+    "T1" : {"Kp" : 0.02, "Ki" : 0.0, "Kd" : 5.0}, 
+    "T2" : {"Kp" : 0.025, "Ki" : 0.0, "Kd" : 5.0},
+    "T3" : {"Kp" : 0.025, "Ki" : 0.0, "Kd" : 5.0},
+    "B1" : {"Kp" : 0.08, "Ki" : 0.0, "Kd" : 5.0},
+    "B2" : {"Kp" : 0.06, "Ki" : 0.0, "Kd" : 5.0},
+    "B3" : {"Kp" : 0.06, "Ki" : 0.0, "Kd" : 5.0},
 }
+
+# Kpt = 0.02
+# Kit = 0.000
+# Kdt = 5.0
+# Kpb = 0.03
+# Kib = 0.000
+# Kdb = 5.0
+# pidParams = {
+#     "T1" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+#     "T2" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+#     "T3" : {"Kp" : Kpt, "Ki" : Kit, "Kd" : Kdt}, 
+#     "B1" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+#     "B2" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+#     "B3" : {"Kp" : Kpb, "Ki" : Kib, "Kd" : Kdb}, 
+# }
 
 
 pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"], setpoint=target_temperature),
