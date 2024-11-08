@@ -8,13 +8,12 @@ import keyboard  # To detect key presses
 from datetime import datetime
 
 # Define the maximum allowable heating rate in degrees per second
-max_heating_rate = 100.0  # Example: 0.5 degrees per second, ideally 5 - 20 K/h
-max_temp_difference = 20.0 # max difference between setpoint and actual temperature, ideally max 5 K
-target_temperature = 60.0  # Desired temperature (setpoint) for all sensors
+max_heating_rate_h = 5      # ideally 5 - 20 K/h
+max_heating_rate = 5 / 3600 # translate K/h in K/s
+max_heating_rate = 100.0    # manually set
+max_temp_difference = 10.0  # max difference between setpoint and actual temperature, ideally max 5 K
+target_temperature = 60.0   # Desired temperature (setpoint) for all sensors
 
-now = datetime.now()
-dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
-filename = "./log/" + dt_string + ".csv" 
 start_time = time.time()
 print("start time ", start_time)
 running = True
@@ -246,29 +245,11 @@ def control_pwm_duty_cycles():
                     duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate))
                     print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
                 else:
-                    print(f"Heating rate exceeded for channel {i} ok")
+                    # heating rate ok
                     duty_cycles[i] = pid_output
                 # Update previous temperatures for the next rate calculation
                 previous_temperatures[i][0] = current_temperature
 
-                # Simulate the heater power using the PID controller
-                #heater_power = prediction_pids[i](set_points[i] - current_temperature)
-
-                # Smith Predictor: Calculate the predicted temperature considering the delay
-                #predicted_temperature = model_temperature_with_delay(heater_power, current_temperature, previous_temperatures[i])
-
-                # Calculate the control signal (heater power) based on predicted temperature
-                #duty_cycles[i] = pids[i](predicted_temperature)
-
-                # Store the current temperature for future delay reference
-                #previous_temperatures[i].append(current_temperature)
-
-                # Limit the length of previous temperatures to the number of time steps equal to L
-                #if len(previous_temperatures[i]) > int(L / 0.5):  # Assuming time step is 0.5 seconds
-                #    previous_temperatures[i].pop(0)
-
-                # Use the PID controller to calculate the new duty cycle based on temperature error
-                #duty_cycles[i] = pids[i](current_temperature)
 
                 # test with fixed duty cycle
                 #duty_cycles[i] = 0.1
