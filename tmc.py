@@ -7,6 +7,13 @@ import keyboard  # To detect key presses
 
 from datetime import datetime
 
+# choose device name for simulation or real device
+sumulation_device_name = "cDAQsim1"
+real_device_name = "cDAQ1"
+device_name = sumulation_device_name
+
+simulate_temperature_rise = False
+
 # Define the maximum allowable heating rate in degrees per second
 max_heating_rate_h = 5      # ideally 5 - 20 K/h
 max_heating_rate = 5 / 3600 # translate K/h in K/s
@@ -14,16 +21,19 @@ max_heating_rate = 100.0    # manually set
 max_temp_difference = 10.0  # max difference between setpoint and actual temperature, ideally max 5 K
 target_temperature = 60.0   # Desired temperature (setpoint) for all sensors
 
+filename = "./log/" + dt_string + ".csv" 
 start_time = time.time()
 print("start time ", start_time)
 running = True
-device_name = "cDAQsim1"
-#device_name = "cDAQ1"
 
+# Parameters for PWM signal (initial values for each of the 6 channels)
 pwm_channels = [
     device_name + "Mod3/port0/line0", device_name + "Mod3/port0/line1", device_name + "Mod3/port0/line2", 
     device_name + "Mod3/port0/line3", device_name + "Mod3/port0/line4", device_name + "Mod3/port0/line5"
 ]
+frequency = 0.5  # Frequency in Hz
+duty_cycles = [0.0] * len(pwm_channels)  # Initial duty cycles for 6 channels (0.0 to 1.0)
+set_points = [target_temperature] * len(pwm_channels)
 
 # Parameters for temperature reading
 thermocouple_channels = [
@@ -32,18 +42,11 @@ thermocouple_channels = [
 ]  # List of 6 thermocouple channels
 sample_rate = 1  # Number of temperature samples per second
 
-# Parameters for PWM signal (initial values for each of the 8 channels)
-frequency = 0.5  # Frequency in Hz
-duty_cycles = [0.0] * len(pwm_channels)  # Initial duty cycles for 6 channels (0.0 to 1.0)
-
-set_points = [target_temperature] * len(pwm_channels)
-
 # Shared variables between threads (global)
 temperatures = [[25.0]] * len(thermocouple_channels)  # Store the most recent temperature readings for 6 thermocouples
 duty_cycle_locks = [threading.Lock() for _ in range(len(pwm_channels))]  # Lock for each channel to update duty cycle
 
-# PID controller setup (one for each thermocouple-PWM pair)
-#pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
+# PID controller setup
 pidParams = {
     "T1" : {"Kp" : 0.064823199, "Ki" : 0.001087731, "Kd" : 2.422442948}, 
     "T2" : {"Kp" : 0.062793234, "Ki" : 0.001055583, "Kd" : 2.346583167},
@@ -88,22 +91,13 @@ pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"],
 for pid in pids:
     pid.output_limits = (0, 0.5)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
 
-# PID controller setup (one for each thermocouple-PWM pair)
-#prediction_pids = [PID(1.0, 0.0, 0.00, setpoint=target_temperature) for _ in range(len(pwm_channels))]
-prediction_pids =   [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"], setpoint=target_temperature),
-                    PID(pidParams["T2"]["Kp"], pidParams["T2"]["Ki"], pidParams["T2"]["Kd"], setpoint=target_temperature),
-                    PID(pidParams["T3"]["Kp"], pidParams["T3"]["Ki"], pidParams["T3"]["Kd"], setpoint=target_temperature),
-                    PID(pidParams["B1"]["Kp"], pidParams["B1"]["Ki"], pidParams["B1"]["Kd"], setpoint=target_temperature),
-                    PID(pidParams["B2"]["Kp"], pidParams["B2"]["Ki"], pidParams["B2"]["Kd"], setpoint=target_temperature),
-                    PID(pidParams["B3"]["Kp"], pidParams["B3"]["Ki"], pidParams["B3"]["Kd"], setpoint=target_temperature)
-                    ]
-for pid in prediction_pids:
-    pid.output_limits = (0, 1.0)  # Constrain the duty cycle output to 0 (0%) and 1 (100%) 
+#### Functions ###
 
-
-def adjust_target_temperature():
+# adjust setpoint depending on max temperature difference setting
+def adjust_setpoint():
     global target_temperature
     global temperatures
+    global max_temp_difference
 
     min_temperature = min([temp[0] for temp in temperatures])
     new_setpoint = min(min_temperature + max_temp_difference, target_temperature)
@@ -112,7 +106,7 @@ def adjust_target_temperature():
     return new_setpoint
 
 
-# Function for reading temperatures from 8 thermocouples
+# Function for reading temperatures from 6 thermocouples
 def read_temperatures():
     global temperatures
     global duty_cycles
@@ -123,27 +117,29 @@ def read_temperatures():
         task.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.CONTINUOUS)
 
         while running:
-            # Read temperatures from all 8 channels
-            temps = task.read(number_of_samples_per_channel=1)
-            #for i in range(len(thermocouple_channels)):
-                #temperatures[i] = temps[i]
-                #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
-            new_list = []
-            for list in temps:
-                new_list.append(list[0])
+            temperatures_formatted = []
+            # Read temperatures from all 6 channels
+            if not simulate_temperature_rise:
+                temps = task.read(number_of_samples_per_channel=1)
+                for i in range(len(thermocouple_channels)):
+                    temperatures[i] = temps[i]
+                    #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+                for list in temps:
+                    temperatures_formatted.append(list[0])
             
-            # test
-            new_list = []
-            for i in range(len(temperatures)):
-                temp = temperatures[i][0]
-                temp = temp + 0.01
-                temperatures[i][0] = temp
-                new_list.append(temp)
-                #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
+            # simulate temperature rise
+            if simulate_temperature_rise:
+                temperatures_formatted = []
+                for i in range(len(temperatures)):
+                    temp = temperatures[i][0]
+                    temp = temp + 0.01
+                    temperatures[i][0] = temp
+                    temperatures_formatted.append(temp)
+                    #print(f"Temperature {i}: {temperatures[i][0]:.2f} °C")
             
-            new_setpoint = adjust_target_temperature()
+            new_setpoint = adjust_setpoint()
 
-            formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in new_list) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles) + f" NewSetpoint: {new_setpoint:.2f} "
+            formatted_output = "Temp: " + " ".join(f"{num:.2f}" for num in temperatures_formatted) + " Duty Cycle: " + " ".join(f"{num:.2f}" for num in duty_cycles) + f" NewSetpoint: {new_setpoint:.2f} "
             print(formatted_output)
 
             time.sleep(1.0 / sample_rate)
@@ -191,25 +187,6 @@ def generate_pwm():
         # Turn all outputs OFF
         pwm_states = [False] * len(pwm_channels)
         task.write(pwm_states)
-
-# System parameters
-K = 700.0  # System gain
-T = 4000.0  # System time constant
-L = 100.0  # Delay (in seconds)
-
-def model_temperature_without_delay(heater_power, current_temperature):
-    """Simulate temperature change without delay."""
-    # Simple thermal model: next temperature depends on power and current temperature
-    new_temperature = current_temperature + K * heater_power / (T + 1)
-    return new_temperature
-
-# Simulate temperature change with delay
-def model_temperature_with_delay(heater_power, current_temperature, previous_temperatures):
-    """Simulate temperature change considering delay."""
-    # Using the previous temperature state to account for delay
-    if len(previous_temperatures) == 0:
-        return current_temperature  # If no previous state, return current temperature
-    return model_temperature_without_delay(heater_power, previous_temperatures[-1])
 
 # Function to adjust the PWM duty cycles using PID control based on the temperatures
 def control_pwm_duty_cycles():
