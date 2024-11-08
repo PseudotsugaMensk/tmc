@@ -21,10 +21,10 @@ max_heating_rate = 100.0    # manually set
 max_temp_difference = 10.0  # max difference between setpoint and actual temperature, ideally max 5 K
 target_temperature = 60.0   # Desired temperature (setpoint) for all sensors
 
-filename = "./log/" + dt_string + ".csv" 
-start_time = time.time()
-print("start time ", start_time)
-running = True
+
+# logging parameters
+dt_string = now.strftime("%d.%m.%Y %H.%M.%S")
+filename = "./log/" + dt_string + ".csv"
 
 # Parameters for PWM signal (initial values for each of the 6 channels)
 pwm_channels = [
@@ -90,6 +90,14 @@ pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"],
         ]
 for pid in pids:
     pid.output_limits = (0, 0.5)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
+
+
+# timing init
+start_time = time.time()
+print("start time ", start_time)
+
+# running flag
+running = True
 
 #### Functions ###
 
