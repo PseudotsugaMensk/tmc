@@ -9,12 +9,12 @@ import os
 from datetime import datetime
 
 # choose device name for simulation or real device
-sumulation_device_name = "cDAQsim1"
+simulation_device_name = "cDAQsim1"
 real_device_name = "cDAQ1"
-device_name = sumulation_device_name
+device_name = simulation_device_name
 
 # choose to simulate a temperature rise
-simulate_temperature_rise = True
+simulate_temperature_rise = False
 
 # log interval in seconds
 log_interval = 1
@@ -45,7 +45,7 @@ thermocouple_channels = [
 sample_rate = 1  # Number of temperature samples per second
 
 # Shared variables between threads (global)
-temperatures = [[25.0]] * len(thermocouple_channels)  # Store the most recent temperature readings for 6 thermocouples
+temperatures = [[25.0] for _ in range(len(thermocouple_channels))] # Store the most recent temperature readings for 6 thermocouples
 duty_cycle_locks = [threading.Lock() for _ in range(len(pwm_channels))]  # Lock for each channel to update duty cycle
 
 # PID controller setup
@@ -232,67 +232,89 @@ def control_pwm_duty_cycles():
     counter = 0
     print("start at ", time.time() - start_time)
 
+    
     while running:
-        elapsed_time = time.time() - start_time
-        current_time = time.time()
-        # Time delta in minutes (convert from seconds to minutes)
-        time_delta_minutes = (current_time - previous_time)  # Convert seconds to minutes
-        
-        # Store current temperatures every 0.5 seconds
-        for i in range(len(pwm_channels)):
-            current_temperature = temperatures[i][0]
-            temperature_history[i].append(current_temperature)  # Store the current temperature in the history list
-
-            # Keep the history size to 120 (for 1 minute with 0.5-second intervals)
-            if len(temperature_history[i]) > 120:
-                temperature_history[i].pop(0)  # Remove the oldest entry (i.e., 1 minute ago)
-
-        for i in range(len(pwm_channels)):
-            with duty_cycle_locks[i]:
-                # Get the current temperature reading for each sensor
+        with open(filename, 'a') as file:
+            elapsed_time = time.time() - start_time
+            current_time = time.time()
+            # Time delta in minutes (convert from seconds to minutes)
+            time_delta_minutes = (current_time - previous_time)  # Convert seconds to minutes
+            
+            # Store current temperatures every 0.5 seconds
+            for i in range(len(pwm_channels)):
                 current_temperature = temperatures[i][0]
+                temperature_history[i].append(current_temperature)  # Store the current temperature in the history list
 
-                # Temperature 1 minute ago (120 half-seconds ago) or if not enough data then the oldest
-                previous_temperature = temperature_history[i][0]
+                # Keep the history size to 120 (for 1 minute with 0.5-second intervals)
+                if len(temperature_history[i]) > 120:
+                    temperature_history[i].pop(0)  # Remove the oldest entry (i.e., 1 minute ago)
 
-                # Calculate the rate of temperature change in °C/min (multiply by 2 to convert 0.5 sec intervals to 1 min)
-                temperature_rate_of_change = (current_temperature - previous_temperature) * 2
-
-                # Apply PID control
-                pid_output = pids[i](current_temperature)
-                # Check if the heating rate exceeds the maximum allowable rate
-                if temperature_rate_of_change > max_heating_rate_min:
-                    # Reduce the duty cycle if the rate of change is too high
-                    duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate_min))
-                    # print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
-                else:
-                    # heating rate ok
-                    duty_cycles[i] = pid_output
-                # Update previous temperatures for the next rate calculation
-                previous_temperatures[i][0] = current_temperature
-
-                # test with fixed duty cycle
-                #duty_cycles[i] = 0.1
-
-        # Log temperature and duty cycles periodically
-        if counter >= 2:
-            with open(filename, 'a') as file:
-                file.write(f"{elapsed_time:.0f}; ")
-
-            # Write current temperature and duty cycle for each channel
             for i in range(len(pwm_channels)):
                 with duty_cycle_locks[i]:
-                    with open(filename, 'a') as file:
-                        file.write(f"{temperatures[i][0]:.2f}; ")
-                        file.write(f"{duty_cycles[i]:.2f}; ")
-            with open(filename, 'a') as file:
-                file.write("\n")
-            counter = 0
-        
-        # Update the previous timestamp and reset the counter
-        previous_time = current_time
-        counter += 1
-        time.sleep(0.5)  # Update the duty cycles every 0.5 seconds
+                    # Get the current temperature reading for each sensor
+                    current_temperature = temperatures[i][0]
+
+                    # Temperature 1 minute ago (120 half-seconds ago) or if not enough data then the oldest
+                    previous_temperature = temperature_history[i][0]
+
+                    # Calculate the rate of temperature change in °C/min (multiply by 2 to convert 0.5 sec intervals to 1 min)
+                    temperature_rate_of_change = (current_temperature - previous_temperature) * 2
+
+                    # Apply PID control
+                    pid_output = pids[i](current_temperature)
+                    # Check if the heating rate exceeds the maximum allowable rate
+                    if temperature_rate_of_change > max_heating_rate_min:
+                        # Reduce the duty cycle if the rate of change is too high
+                        duty_cycles[i] = max(0, pid_output - 0.1 * (temperature_rate_of_change - max_heating_rate_min))
+                        # print(f"Heating rate exceeded for channel {i}, reducing duty cycle from {pid_output:.2f} to {duty_cycles[i]:.2f}")
+                    else:
+                        # heating rate ok
+                        duty_cycles[i] = pid_output
+                    # Update previous temperatures for the next rate calculation
+                    previous_temperatures[i][0] = current_temperature
+
+                    # test with fixed duty cycle
+                    #duty_cycles[i] = 0.1
+
+            if counter >= 2:
+                try:
+                    log_line = f"{elapsed_time:.0f}; "
+                    
+                    # Add temperatures and duty cycles to the line
+                    for i in range(len(pwm_channels)):
+                        with duty_cycle_locks[i]:
+                            log_line += f"{temperatures[i][0]:.2f}; "
+                    for i in range(len(thermocouple_channels)):
+                        with duty_cycle_locks[i]:
+                            log_line += f"{duty_cycles[i]:.2f}; "
+                    log_line += f"{temperature_rate_of_change:.2f}; "
+                    log_line += f"{max_heating_rate_h:.2f}; "
+                    log_line += f"{pids[0].setpoint:.2f}; "
+                    log_line += "\n"
+                    file.write(log_line)
+                except Exception as e:
+                    print(f"Error writing to log file: {e}")
+                counter = 0
+                
+            # # Log temperature and duty cycles periodically
+            # if counter >= 2:
+            #     with open(filename, 'a') as file:
+            #         file.write(f"{elapsed_time:.0f}; ")
+
+            #     # Write current temperature and duty cycle for each channel
+            #     for i in range(len(pwm_channels)):
+            #         with duty_cycle_locks[i]:
+            #             with open(filename, 'a') as file:
+            #                 file.write(f"{temperatures[i][0]:.2f}; ")
+            #                 file.write(f"{duty_cycles[i]:.2f}; ")
+            #     with open(filename, 'a') as file:
+            #         file.write("\n")
+            #     counter = 0
+            
+            # Update the previous timestamp and reset the counter
+            previous_time = current_time
+            counter += 1
+            time.sleep(0.5)  # Update the duty cycles every 0.5 seconds
 
 # Function to check for a keystroke (e.g., 'q' to quit) and exit
 def check_for_exit():
