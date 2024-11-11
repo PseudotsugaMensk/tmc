@@ -91,7 +91,7 @@ pids = [PID(pidParams["T1"]["Kp"], pidParams["T1"]["Ki"], pidParams["T1"]["Kd"],
         PID(pidParams["B3"]["Kp"], pidParams["B3"]["Ki"], pidParams["B3"]["Kd"], setpoint=target_temperature)
         ]
 for pid in pids:
-    pid.output_limits = (0, 0.5)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
+    pid.output_limits = (0, 0.8)  # Constrain the duty cycle output to 0 (0%) and 1 (100%)
 
 
 # logging parameters
